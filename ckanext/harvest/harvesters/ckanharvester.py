@@ -235,6 +235,7 @@ class CKANHarvester(HarvesterBase):
 
             try:
                 pkg_dicts = self._search_for_datasets(
+                    harvest_job,
                     remote_ckan_base_url,
                     fq_terms + [fq_since_last_time])
             except SearchError as e:
@@ -252,7 +253,8 @@ class CKANHarvester(HarvesterBase):
         if get_all_packages:
             # Request all remote packages
             try:
-                pkg_dicts = self._search_for_datasets(remote_ckan_base_url,
+                pkg_dicts = self._search_for_datasets(harvest_job,
+                                                      remote_ckan_base_url,
                                                       fq_terms)
             except SearchError as e:
                 log.info('Searching for all datasets gave an error: %s', e)
@@ -292,13 +294,18 @@ class CKANHarvester(HarvesterBase):
         except Exception as e:
             self._save_gather_error('%r' % e.message, harvest_job)
 
-    def _search_for_datasets(self, remote_ckan_base_url, fq_terms=None):
+    def _search_for_datasets(self, harvest_job, remote_ckan_base_url, fq_terms=None):
         '''Does a dataset search on a remote CKAN and returns the results.
 
         Deals with paging to return all the results, not just the first page.
         '''
         base_search_url = remote_ckan_base_url + self._get_search_api_offset()
-        params = {'rows': '100', 'start': '0'}
+        # Set the param variables
+        rows = self.config.get('rows', 1000)
+        start = self.config.get('start', 0)
+        end = self.config.get('end', 0)
+        sorting_by = self.config.get('sorting_by', 'id asc')
+        params = {'rows': rows, 'start': start, 'end': end}
         # There is the worry that datasets will be changed whilst we are paging
         # through them.
         # * In SOLR 4.7 there is a cursor, but not using that yet
@@ -316,7 +323,7 @@ class CKANHarvester(HarvesterBase):
         #   they will harvested the next time anyway. When datasets are added,
         #   we are at risk of seeing datasets twice in the paging, so we detect
         #   and remove any duplicates.
-        params['sort'] = 'id asc'
+        params['sort'] = sorting_by
         if fq_terms:
             params['fq'] = ' '.join(fq_terms)
 
@@ -358,9 +365,12 @@ class CKANHarvester(HarvesterBase):
                                   if p['id'] not in duplicate_ids]
             pkg_ids |= ids_in_page
 
-            pkg_dicts.extend(pkg_dicts_page)
+            pkg_dicts.extend(self._create_harvest_objects(pkg_dicts_page, harvest_job))
 
             if len(pkg_dicts_page) == 0:
+                break
+
+            if params['start'] > params['end']:
                 break
 
             params['start'] = str(int(params['start']) + int(params['rows']))
