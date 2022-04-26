@@ -17,7 +17,8 @@ from .base import HarvesterBase
 
 import logging
 log = logging.getLogger(__name__)
-
+conf = toolkit.config
+debug = toolkit.asbool(conf.get('debug', conf.get('DEBUG', False)))
 
 class CKANHarvester(HarvesterBase):
     '''
@@ -370,7 +371,9 @@ class CKANHarvester(HarvesterBase):
             if len(pkg_dicts_page) == 0:
                 break
 
-            if params['start'] > params['end']:
+            # When debugging we should have option to fetch only a few datasets
+            # and stop debuging
+            if debug and params['start'] > params['end']:
                 break
 
             params['start'] = str(int(params['start']) + int(params['rows']))

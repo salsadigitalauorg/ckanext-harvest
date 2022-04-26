@@ -3,6 +3,7 @@
 import logging
 import re
 import uuid
+import json
 
 from sqlalchemy import exists, and_
 from sqlalchemy.sql import update, bindparam
@@ -209,26 +210,35 @@ class HarvesterBase(SingletonPlugin):
 
         return self._user_name
 
-    def _create_harvest_objects(self, remote_ids, harvest_job):
+    def _create_harvest_objects(self, pkg_dicts, harvest_job):
         '''
         Given a list of remote ids and a Harvest Job, create as many Harvest Objects and
         return a list of their ids to be passed to the fetch stage.
 
         TODO: Not sure it is worth keeping this function
         '''
+        object_ids = []
         try:
-            object_ids = []
-            if len(remote_ids):
-                for remote_id in remote_ids:
-                    # Create a new HarvestObject for this identifier
-                    obj = HarvestObject(guid=remote_id, job=harvest_job)
-                    obj.save()
-                    object_ids.append(obj.id)
-                return object_ids
-            else:
-                self._save_gather_error('No remote datasets could be identified', harvest_job)
+            package_ids = set()
+            for pkg_dict in pkg_dicts:
+                if pkg_dict['id'] in package_ids:
+                    log.info('Discarding duplicate dataset %s - probably due '
+                        'to datasets being changed at the same time as '
+                        'when the harvester was paging through',
+                        pkg_dict['id'])
+                    continue
+                package_ids.add(pkg_dict['id'])
+                log.debug('Creating HarvestObject for %s %s',
+                        pkg_dict['name'], pkg_dict['id'])
+                obj = HarvestObject(guid=pkg_dict['id'],
+                                    job=harvest_job,
+                                    content=json.dumps(pkg_dict))
+                obj.save()
+                object_ids = [obj.id]
+            return object_ids
         except Exception as e:
-            self._save_gather_error('%r' % e.message, harvest_job)
+            self._save_gather_error('%s' % e.message, harvest_job)
+
 
     def _create_or_update_package(self, package_dict, harvest_object,
                                   package_dict_form='rest'):
