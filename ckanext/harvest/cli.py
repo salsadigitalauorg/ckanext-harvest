@@ -391,7 +391,7 @@ def reindex(ctx):
         utils.reindex()
 
 
-@harvester.command("harvesters_info")
+@harvester.command("harvesters-info")
 @click.pass_context
 def harvesters_info(ctx):
     """
