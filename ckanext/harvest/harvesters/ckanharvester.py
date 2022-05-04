@@ -12,7 +12,7 @@ from ckan.logic import ValidationError, NotFound, get_action
 from ckan.lib.helpers import json
 from ckan.plugins import toolkit
 
-from ckanext.harvest.model import HarvestObject
+from ckanext.harvest.model import HarvestObject, HarvestObjectExtra
 from .base import HarvesterBase
 
 import logging
@@ -166,13 +166,33 @@ class CKANHarvester(HarvesterBase):
                     raise ValueError('User not found')
 
             for key in ('read_only', 'force_all'):
-                if key in config_obj:
-                    if not isinstance(config_obj[key], bool):
-                        raise ValueError('%s must be boolean' % key)
+                if key in config_obj and not isinstance(config_obj[key], bool):
+                    raise ValueError(f'{key} must be boolean')
 
+            if 'start' in config_obj:
+                try:
+                    int(config_obj['start'])
+                except ValueError as e:
+                    raise ValueError('start must be an integer') from e
+
+            if 'rows' in config_obj:
+                try:
+                    int(config_obj['rows'])
+                except ValueError as e:
+                    raise ValueError('rows must be an integer') from e
+            
+            if 'end' in config_obj:
+                try:
+                    int(config_obj['end'])
+                except ValueError as e:
+                    raise ValueError('end must be an integer') from e
+
+            if 'sorting_by' in config_obj:
+                if not isinstance(config_obj['sorting_by'], six.string_types):
+                    raise ValueError('sorting_by must be a string')
+                
         except ValueError as e:
             raise e
-
         return config
 
     def modify_package_dict(self, package_dict, harvest_object):
@@ -270,30 +290,57 @@ class CKANHarvester(HarvesterBase):
                 harvest_job)
             return []
 
-        # Create harvest objects for each dataset
-        try:
-            package_ids = set()
-            object_ids = []
-            for pkg_dict in pkg_dicts:
-                if pkg_dict['id'] in package_ids:
-                    log.info('Discarding duplicate dataset %s - probably due '
-                             'to datasets being changed at the same time as '
-                             'when the harvester was paging through',
-                             pkg_dict['id'])
-                    continue
-                package_ids.add(pkg_dict['id'])
+        # # Create harvest objects for each dataset
+        # try:
+        #     package_ids = set()
+        #     object_ids = []
+        #     for pkg_dict in pkg_dicts:
+        #         if pkg_dict['id'] in package_ids:
+        #             log.info('Discarding duplicate dataset %s - probably due '
+        #                      'to datasets being changed at the same time as '
+        #                      'when the harvester was paging through',
+        #                      pkg_dict['id'])
+        #             continue
+        #         package_ids.add(pkg_dict['id'])
 
-                log.debug('Creating HarvestObject for %s %s',
-                          pkg_dict['name'], pkg_dict['id'])
-                obj = HarvestObject(guid=pkg_dict['id'],
-                                    job=harvest_job,
-                                    content=json.dumps(pkg_dict))
-                obj.save()
-                object_ids.append(obj.id)
+        #         log.debug('Creating HarvestObject for %s %s',
+        #                   pkg_dict['name'], pkg_dict['id'])
+        #         obj = HarvestObject(guid=pkg_dict['id'],
+        #                             job=harvest_job,
+        #                             content=json.dumps(pkg_dict))
+        #         obj.save()
+        #         object_ids.append(obj.id)
 
-            return object_ids
-        except Exception as e:
-            self._save_gather_error('%r' % e.message, harvest_job)
+        #     return object_ids
+
+        # except Exception as e:
+        #     self._save_gather_error('%r' % e.message, harvest_job)
+
+        # Get the previous guids for this source
+        query = \
+            model.Session.query(HarvestObject.guid, HarvestObject.package_id) \
+            .filter(HarvestObject.current == True) \
+            .filter(HarvestObject.harvest_source_id == harvest_job.source.id)
+        guid_to_package_id = {}
+
+        for guid, package_id in query:
+            guid_to_package_id[guid] = package_id
+
+        guids_in_db = guid_to_package_id.keys()
+        guids_in_source = lambda pkg_id: (pkg_id in pkg_dicts['id'])
+
+        # Check datasets that need to be deleted
+        guids_to_delete = set(guids_in_db) - set(guids_in_source)
+
+        for guid in guids_to_delete:
+            obj = HarvestObject(
+                guid=guid, job=harvest_job,
+                package_id=guid_to_package_id[guid],
+                extras=[HarvestObjectExtra(key='status', value='delete')])
+            model.Session.query(HarvestObject).\
+                filter_by(guid=guid).\
+                update({'current': False}, False)
+            obj.save()
 
     def _search_for_datasets(self, harvest_job, remote_ckan_base_url, fq_terms=None):
         '''Does a dataset search on a remote CKAN and returns the results.

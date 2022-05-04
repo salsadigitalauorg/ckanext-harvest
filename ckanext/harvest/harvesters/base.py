@@ -221,12 +221,12 @@ class HarvesterBase(SingletonPlugin):
         try:
             package_ids = set()
             for pkg_dict in pkg_dicts:
-                if pkg_dict['id'] in package_ids:
-                    log.info('Discarding duplicate dataset %s - probably due '
-                        'to datasets being changed at the same time as '
-                        'when the harvester was paging through',
-                        pkg_dict['id'])
-                    continue
+                # if pkg_dict['id'] in package_ids:
+                #     log.info('Discarding duplicate dataset %s - probably due '
+                #         'to datasets being changed at the same time as '
+                #         'when the harvester was paging through',
+                #         pkg_dict['id'])
+                #     continue
                 package_ids.add(pkg_dict['id'])
                 log.debug('Creating HarvestObject for %s %s',
                         pkg_dict['name'], pkg_dict['id'])
